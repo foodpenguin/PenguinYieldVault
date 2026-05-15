@@ -923,6 +923,8 @@ func sendExecuteTx(
 }
 
 func loadConfig() (Config, error) {
+	_ = loadDotEnv("../../.env")
+	_ = loadDotEnv("../.env")
 	if err := loadDotEnv(".env"); err != nil {
 		return Config{}, fmt.Errorf("read .env failed: %w", err)
 	}
