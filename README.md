@@ -1,6 +1,6 @@
-# MevBot: 自動化交易與流動性管理系統
+# PenguinYieldVault: 自動化交易與流動性管理系統
 
-MevBot 是一套高效能的鏈上自動化策略與流動性提供 (Liquidity Provisioning) 系統。本專案以 ERC-4626 標準金庫 (Vault) 為核心，透過 Go 語言編寫的鏈下機器人 (Keeper) 即時計算技術指標 (ATR/ADX)，自動執行 Uniswap V3 的流動性區間再平衡與跨池套利。
+PenguinYieldVault 是一套高效能的鏈上自動化策略與流動性提供系統。本專案以 ERC-4626 標準金庫為核心，透過 Go 語言編寫的鏈下機器人即時計算技術指標 (ATR/ADX)，自動執行 Uniswap V3 的流動性區間再平衡與跨池套利。
 
 ## 核心系統架構
 
