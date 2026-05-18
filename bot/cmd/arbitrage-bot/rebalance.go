@@ -360,13 +360,18 @@ func (r *RebalanceRunner) RunCycle(
 		}
 		log.Printf("bootstrap tx sent: %s (amountAllocated: %s)", txHash.Hex(), availToAlloc.String())
 	} else {
+		debtToSettle, err := r.fetchStrategyDebt(ctx, client, cfg.VaultAddress, cfg.RebalanceSource)
+		if err != nil {
+			log.Printf("fetch strategyDebt failed, fallback to config principalToSettle: %v", err)
+			debtToSettle = cfg.RebalancePrincipalToSettle
+		}
 		txHash, err = r.sendManagedStrategyTx(
-			ctx, client, cfg, privateKey, from, strategyParams, contextHash, gasLimit, tipCap, feeCap,
+			ctx, client, cfg, privateKey, from, strategyParams, contextHash, debtToSettle, gasLimit, tipCap, feeCap,
 		)
 		if err != nil {
 			return fmt.Errorf("send rebalance tx failed: %w", err)
 		}
-		log.Printf("rebalance tx sent: %s", txHash.Hex())
+		log.Printf("rebalance tx sent: %s (principalToSettle: %s)", txHash.Hex(), debtToSettle.String())
 	}
 
 	if action == 0 {
@@ -385,6 +390,7 @@ func (r *RebalanceRunner) sendManagedStrategyTx(
 	from common.Address,
 	strategyParams []byte,
 	contextHash common.Hash,
+	principalToSettle *big.Int,
 	gasLimit uint64,
 	tipCap *big.Int,
 	feeCap *big.Int,
@@ -394,7 +400,7 @@ func (r *RebalanceRunner) sendManagedStrategyTx(
 		cfg.RebalanceSource,
 		strategyParams,
 		contextHash,
-		cfg.RebalancePrincipalToSettle,
+		principalToSettle,
 		uint16(cfg.RebalanceMaxLossBps),
 		cfg.RebalanceMinReturnedAssets,
 	)
@@ -529,6 +535,17 @@ func (r *RebalanceRunner) fetchAvailableForStrategy(ctx context.Context, client 
 	}
 	if len(raw) != 1 {
 		return nil, errors.New("availableForStrategy unexpected return length")
+	}
+	return asBigInt(raw[0])
+}
+
+func (r *RebalanceRunner) fetchStrategyDebt(ctx context.Context, client *ethclient.Client, vault, strategy common.Address) (*big.Int, error) {
+	raw, err := callMethod(ctx, client, r.vaultABI, vault, "strategyDebt", strategy)
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) != 1 {
+		return nil, errors.New("strategyDebt unexpected return length")
 	}
 	return asBigInt(raw[0])
 }

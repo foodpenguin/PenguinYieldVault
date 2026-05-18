@@ -155,7 +155,8 @@ var (
 
 	vaultABIJSON = `[
 		{"inputs":[],"name":"totalAssets","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},
-		{"inputs":[{"internalType":"address","name":"strategy","type":"address"}],"name":"availableForStrategy","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"}
+		{"inputs":[{"internalType":"address","name":"strategy","type":"address"}],"name":"availableForStrategy","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},
+		{"inputs":[{"internalType":"address","name":"strategy","type":"address"}],"name":"strategyDebt","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"}
 	]`
 )
 
