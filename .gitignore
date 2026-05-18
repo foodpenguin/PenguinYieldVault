@@ -24,6 +24,7 @@ bot/.env
 
 # Logs
 *.log
+logs/
 
 bot/arbitrage-bot
 bot/rebalance_state.json
