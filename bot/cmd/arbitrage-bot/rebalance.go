@@ -281,7 +281,7 @@ func (r *RebalanceRunner) RunCycle(
 			liquidityShare = liquidityF / poolLiquidity
 		}
 
-		expectedFees = estimateExpectedFees(cfg.RebalanceDailyVolumeAsset, snap.Fee, liquidityShare, cfg.RebalanceExpectedFeeDays)
+		expectedFees = estimateExpectedFees(cfg.RebalanceDailyVolumeAsset, snap.Fee, liquidityShare, cfg.RebalanceExpectedFeeDays) * 1e18
 		divergenceLoss = positionValueAsset * estimateImpermanentLoss(r.state.BasePrice, price)
 		goldenRuleCost := divergenceLoss + gasCostAsset + swapCost
 		goldenRuleOk = expectedFees > goldenRuleCost
