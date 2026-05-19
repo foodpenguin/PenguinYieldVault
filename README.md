@@ -127,11 +127,32 @@ source .env && cast call $VAULT_ADDRESS "pendingLoss()" --rpc-url $RPC_URL | xar
 - **存入 (Deposit)**：調用 `Vault.depositETH(address receiver)` 存入原生 ETH，合約自動封裝為 WETH 並鑄造對應的 ERC-4626 份額 (Shares)。
 - **提領 (Withdraw/Redeem)**：調用 `Vault.withdrawETH(uint256 assets, ...)` 或 `Vault.redeemETH(uint256 shares, ...)`，合約銷毀 Shares 並返還原生 ETH。
 
-### 2. 金庫數據與指標計算
-- **總資產管理規模 (TVL)**：調用 `Vault.totalAssets()`。
-- **閒置準備資產**：`Vault.idleAssets()` (保留於 Vault 合約未放貸或投入策略的資產額度)。
-- **策略分配總額**：`Vault.totalStrategyDebt()` (已分配至各下層策略的資產合計)。
-- **單一用戶資產價值**：`( 用戶持有的 Shares * totalAssets() ) / totalSupply()`。
+### 2. 金庫數據與指標計算 (Solidity 合約接口)
+
+面向 Web3 前端與合約整合，`Vault.sol` 提供了以下公開的唯讀 (View) 函數以獲取系統實時數據：
+
+```solidity
+// 1. 獲取總資產管理規模 (TVL = idleAssets + totalStrategyDebt)
+function totalAssets() public view override returns (uint256);
+
+// 2. 獲取閒置可提取準備金 (Idle WETH)
+function idleAssets() public view returns (uint256);
+
+// 3. 獲取已分配給所有策略的借貸本金總額 (Total Strategy Debt)
+function totalStrategyDebt() public view returns (uint256);
+
+// 4. 獲取特定策略合約當前的借出本金餘額
+function strategyDebt(address strategy) public view returns (uint256);
+
+// 5. 獲取歷史未結清的會計虧損 (Pending Loss)
+function pendingLoss() public view returns (uint256);
+
+// 6. 獲取 EMA 移動平均平滑利潤 (Smoothed PnL)
+function smoothedPnl() public view returns (int256);
+
+// 7. 依據當前兌換率，計算特定 Shares 能兌換的 WETH 資產數量 (每股價值)
+function convertToAssets(uint256 shares) public view override returns (uint256);
+```
 
 ---
 
