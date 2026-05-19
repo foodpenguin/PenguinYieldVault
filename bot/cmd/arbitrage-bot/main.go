@@ -119,6 +119,7 @@ type Config struct {
 	RebalanceTriggerZoneBps        uint64
 	RebalanceCostMultiplierBps     uint64
 	RebalancePaybackThresholdHours float64
+	RebalanceCooldownSec           uint64
 	RebalanceStateFile             string
 	RebalanceMinSwapOut            *big.Int
 	RebalanceAmount0Min            *big.Int
@@ -968,6 +969,7 @@ func loadConfig() (Config, error) {
 		RebalanceTriggerZoneBps:        mustUintWithDefault("REBALANCE_TRIGGER_ZONE_BPS", 2000),
 		RebalanceCostMultiplierBps:     mustUintWithDefault("REBALANCE_COST_MULTIPLIER_BPS", 15000),
 		RebalancePaybackThresholdHours: mustFloatWithDefault("REBALANCE_PAYBACK_THRESHOLD_HOURS", 72.0),
+		RebalanceCooldownSec:           mustUintWithDefault("REBALANCE_COOLDOWN_SEC", 3600),
 		RebalanceStateFile:             mustStringWithDefault("REBALANCE_STATE_FILE", "./rebalance_state.json"),
 		RebalanceMinSwapOut:            mustBigIntWithDefault("REBALANCE_MIN_SWAP_OUT", "1"),
 		RebalanceAmount0Min:            mustBigIntWithDefault("REBALANCE_AMOUNT0_MIN", "0"),

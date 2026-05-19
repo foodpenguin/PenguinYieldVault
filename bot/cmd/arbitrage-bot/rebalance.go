@@ -234,6 +234,18 @@ func (r *RebalanceRunner) RunCycle(
 		log.Printf("rebalance triggering bootstrap: source=%s has no active LP position", cfg.RebalanceSource.Hex())
 	}
 
+	if !isBootstrap {
+		timeSinceLast := nowUnix - r.state.LastRebalanceUnix
+		if timeSinceLast < int64(cfg.RebalanceCooldownSec) {
+			log.Printf(
+				"rebalance skip: price out of range but cooldown in effect (time since last rebalance: %ds < %ds)",
+				timeSinceLast,
+				cfg.RebalanceCooldownSec,
+			)
+			return nil
+		}
+	}
+
 	assetAddr, err := r.fetchStrategyAsset(ctx, client, cfg.RebalanceSource)
 	if err != nil {
 		return fmt.Errorf("read strategy asset failed: %w", err)
@@ -374,7 +386,7 @@ func (r *RebalanceRunner) RunCycle(
 		log.Printf("rebalance tx sent: %s (principalToSettle: %s)", txHash.Hex(), debtToSettle.String())
 	}
 
-	if action == 0 {
+	if action == 0 || isBootstrap {
 		r.state.BasePrice = price
 		r.state.LastRebalanceUnix = nowUnix
 		resetCandlesToCurrentBucket(&r.state.AtrCandles, nowUnix, int64(cfg.RebalanceATRPeriodSec), price)
