@@ -93,6 +93,32 @@ journalctl --user -u penguin-bot.service -f
 
 ---
 
+## 金庫狀態 CLI 實時查詢工具 (Using Cast)
+
+本系統支援透過 Foundry 的 `cast` 工具進行秒級的合約狀態實時查詢。在主機終端機中，您可以直接複製並運行以下命令，快速獲取金庫的 TVL、閒置資產、策略負債與歷史未沖銷虧損等核心數據：
+
+### 1. 查詢金庫總資產規模 (TVL)
+```bash
+source .env && cast call $VAULT_ADDRESS "totalAssets()" --rpc-url $RPC_URL | xargs cast --to-dec | awk '{print $1/10^18 " WETH"}'
+```
+
+### 2. 查詢金庫閒置準備金 (可供隨時提款餘額)
+```bash
+source .env && cast call $VAULT_ADDRESS "idleAssets()" --rpc-url $RPC_URL | xargs cast --to-dec | awk '{print $1/10^18 " WETH"}'
+```
+
+### 3. 查詢策略合約當前借貸餘額 (未歸還本金)
+```bash
+source .env && cast call $VAULT_ADDRESS "totalStrategyDebt()" --rpc-url $RPC_URL | xargs cast --to-dec | awk '{print $1/10^18 " WETH"}'
+```
+
+### 4. 查詢待沖銷歷史虧損 (Pending Loss)
+```bash
+source .env && cast call $VAULT_ADDRESS "pendingLoss()" --rpc-url $RPC_URL | xargs cast --to-dec | awk '{print $1/10^18 " WETH"}'
+```
+
+---
+
 ## 前端 (DApp) 開發與客戶端介面指南
 
 面向終端使用者的 Web 介面或應用程式，資產存取與份額兌換均需透過 **`Vault.sol`** 合約調用。
