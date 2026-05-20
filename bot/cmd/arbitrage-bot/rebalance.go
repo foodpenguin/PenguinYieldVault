@@ -169,21 +169,41 @@ func (r *RebalanceRunner) RunCycle(
 	}
 	updateCandleSeries(&r.state.AdxCandles, nowUnix, price, int64(cfg.RebalanceAdxPeriodSec), maxAdxCandles)
 
-	atr, ok := computeATR(r.state.AtrCandles, cfg.RebalanceATRLength)
-	if !ok {
-		log.Printf("rebalance waiting for ATR data: candles=%d, need=%d", len(r.state.AtrCandles), cfg.RebalanceATRLength)
-		return nil
+	// Check for bootstrap BEFORE ATR/ADX requirements — initial position
+	// creation should not wait for indicator data to accumulate.
+	activeTokenID, err := r.fetchActiveTokenID(ctx, client, cfg.RebalanceSource)
+	if err != nil {
+		return fmt.Errorf("read activeTokenId failed: %w", err)
 	}
-	adx, ok := computeADX(r.state.AdxCandles, cfg.RebalanceAdxLength)
-	if !ok {
-		log.Printf("rebalance waiting for ADX data: candles=%d, need=%d", len(r.state.AdxCandles), cfg.RebalanceAdxLength)
-		return nil
+	isBootstrap := false
+	if activeTokenID.Sign() == 0 {
+		isBootstrap = true
+		log.Printf("rebalance triggering bootstrap: source=%s has no active LP position", cfg.RebalanceSource.Hex())
+	}
+
+	var atr, adx float64
+	if !isBootstrap {
+		var ok bool
+		atr, ok = computeATR(r.state.AtrCandles, cfg.RebalanceATRLength)
+		if !ok {
+			log.Printf("rebalance waiting for ATR data: candles=%d, need=%d", len(r.state.AtrCandles), cfg.RebalanceATRLength)
+			return nil
+		}
+		adx, ok = computeADX(r.state.AdxCandles, cfg.RebalanceAdxLength)
+		if !ok {
+			log.Printf("rebalance waiting for ADX data: candles=%d, need=%d", len(r.state.AdxCandles), cfg.RebalanceAdxLength)
+			return nil
+		}
+	} else {
+		// For bootstrap: use ATR if available, otherwise use a sensible default
+		atr, _ = computeATR(r.state.AtrCandles, cfg.RebalanceATRLength)
+		adx = 0 // ADX is irrelevant for bootstrap
 	}
 
 	rangeHalf := cfg.RebalanceATRMultiplier * atr
 	minRange := price * float64(cfg.RebalanceRangeBpsMin) / float64(bpsDenominator)
 	maxRange := price * float64(cfg.RebalanceRangeBpsMax) / float64(bpsDenominator)
-	if rangeHalf < minRange {
+	if rangeHalf < minRange || isBootstrap {
 		rangeHalf = minRange
 	}
 	if maxRange > 0 && rangeHalf > maxRange {
@@ -202,7 +222,7 @@ func (r *RebalanceRunner) RunCycle(
 	}
 
 	outOfRange := price < lower || price > upper
-	if !outOfRange {
+	if !outOfRange && !isBootstrap {
 		log.Printf(
 			"rebalance not triggered: price=%.10f, base=%.10f, atr=%.10f, adx=%.2f, range=[%.10f, %.10f]",
 			price,
@@ -215,23 +235,13 @@ func (r *RebalanceRunner) RunCycle(
 		return nil
 	}
 
-	if adx < cfg.RebalanceAdxTrendThreshold {
+	if adx < cfg.RebalanceAdxTrendThreshold && !isBootstrap {
 		log.Printf(
 			"rebalance skip: price out of range but in sideways market (adx=%.2f < %.2f)",
 			adx,
 			cfg.RebalanceAdxTrendThreshold,
 		)
 		return nil
-	}
-
-	activeTokenID, err := r.fetchActiveTokenID(ctx, client, cfg.RebalanceSource)
-	if err != nil {
-		return fmt.Errorf("read activeTokenId failed: %w", err)
-	}
-	isBootstrap := false
-	if activeTokenID.Sign() == 0 {
-		isBootstrap = true
-		log.Printf("rebalance triggering bootstrap: source=%s has no active LP position", cfg.RebalanceSource.Hex())
 	}
 
 	if !isBootstrap {
