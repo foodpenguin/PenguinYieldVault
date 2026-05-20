@@ -9,6 +9,11 @@ import {ERC4626} from "openzeppelin-contracts/contracts/token/ERC20/extensions/E
 import {ReentrancyGuard} from "openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
 import {Math} from "openzeppelin-contracts/contracts/utils/math/Math.sol";
 
+/// @notice Optional interface for strategies that can report their NAV
+interface IStrategyNav {
+    function estimatedNavInAsset() external view returns (uint256);
+}
+
 interface IWETHMinimal {
     function deposit() external payable;
     function withdraw(uint256 amount) external;
@@ -376,9 +381,25 @@ contract Vault is ERC4626, Ownable, ReentrancyGuard {
         require(ok, "ETH_TRANSFER_FAILED");
     }
 
-    /// @notice totalAssets = idle + strategy debt
+    /// @notice totalAssets = idle + strategy value (NAV-based when available)
     function totalAssets() public view override returns (uint256) {
-        return idleAssets() + totalStrategyDebt;
+        return idleAssets() + _totalStrategyValue();
+    }
+
+    /// @dev Sum strategy values: uses live NAV if available, otherwise falls back to debt
+    function _totalStrategyValue() internal view returns (uint256 value) {
+        uint256 len = _strategies.length;
+        for (uint256 i = 0; i < len; i++) {
+            address s = _strategies[i];
+            uint256 debt = strategyDebt[s];
+            if (debt == 0) continue;
+
+            try IStrategyNav(s).estimatedNavInAsset() returns (uint256 nav) {
+                value += nav;
+            } catch {
+                value += debt;
+            }
+        }
     }
 
     /// @notice Only accept ETH from WETH unwrap

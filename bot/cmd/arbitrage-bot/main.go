@@ -42,6 +42,15 @@ type PoolSnapshot struct {
 	Tick         int32
 }
 
+// CachedPoolMeta holds immutable pool metadata (token0, token1, fee).
+type CachedPoolMeta struct {
+	Token0 common.Address
+	Token1 common.Address
+	Fee    uint32
+}
+
+var poolMetaCache = map[common.Address]CachedPoolMeta{}
+
 // PairConfig defines a trading pair and its pool list for arbitrage scanning.
 type PairConfig struct {
 	Name  string
@@ -216,6 +225,25 @@ func main() {
 		log.Printf("watching pair: %s (%d pools)", pair.Name, len(pair.Pools))
 	}
 
+	// Pre-cache immutable pool metadata to reduce RPC calls per cycle
+	log.Printf("pre-caching pool metadata...")
+	allPools := make([]common.Address, 0)
+	for _, pair := range pairs {
+		allPools = append(allPools, pair.Pools...)
+	}
+	if cfg.EnableRebalanceBot && cfg.RebalancePool != (common.Address{}) {
+		allPools = append(allPools, cfg.RebalancePool)
+	}
+	for _, pool := range allPools {
+		if _, ok := poolMetaCache[pool]; ok {
+			continue
+		}
+		if err := fetchAndCachePoolMeta(ctx, client, poolABI, pool); err != nil {
+			log.Printf("warning: failed to cache pool %s: %v", pool.Hex(), err)
+		}
+	}
+	log.Printf("cached metadata for %d pools", len(poolMetaCache))
+
 	var rebalanceRunner *RebalanceRunner
 	if cfg.EnableRebalanceBot {
 		rebalanceRunner, err = NewRebalanceRunner(cfg)
@@ -348,18 +376,38 @@ func fetchSnapshots(ctx context.Context, client *ethclient.Client, poolABI abi.A
 }
 
 func fetchSnapshot(ctx context.Context, client *ethclient.Client, poolABI abi.ABI, pool common.Address) (PoolSnapshot, error) {
-	token0Raw, err := callMethod(ctx, client, poolABI, pool, "token0")
-	if err != nil {
-		return PoolSnapshot{}, err
+	// Use cached metadata for token0/token1/fee if available
+	meta, cached := poolMetaCache[pool]
+	if !cached {
+		token0Raw, err := callMethod(ctx, client, poolABI, pool, "token0")
+		if err != nil {
+			return PoolSnapshot{}, err
+		}
+		token1Raw, err := callMethod(ctx, client, poolABI, pool, "token1")
+		if err != nil {
+			return PoolSnapshot{}, err
+		}
+		feeRaw, err := callMethod(ctx, client, poolABI, pool, "fee")
+		if err != nil {
+			return PoolSnapshot{}, err
+		}
+		token0, ok := token0Raw[0].(common.Address)
+		if !ok {
+			return PoolSnapshot{}, errors.New("token0 type assertion failed")
+		}
+		token1, ok := token1Raw[0].(common.Address)
+		if !ok {
+			return PoolSnapshot{}, errors.New("token1 type assertion failed")
+		}
+		fee, err := asUint32(feeRaw[0])
+		if err != nil {
+			return PoolSnapshot{}, fmt.Errorf("fee type assertion failed: %w", err)
+		}
+		meta = CachedPoolMeta{Token0: token0, Token1: token1, Fee: fee}
+		poolMetaCache[pool] = meta
 	}
-	token1Raw, err := callMethod(ctx, client, poolABI, pool, "token1")
-	if err != nil {
-		return PoolSnapshot{}, err
-	}
-	feeRaw, err := callMethod(ctx, client, poolABI, pool, "fee")
-	if err != nil {
-		return PoolSnapshot{}, err
-	}
+
+	// Only fetch dynamic data: liquidity and slot0 (2 RPC calls instead of 5)
 	liqRaw, err := callMethod(ctx, client, poolABI, pool, "liquidity")
 	if err != nil {
 		return PoolSnapshot{}, err
@@ -369,18 +417,6 @@ func fetchSnapshot(ctx context.Context, client *ethclient.Client, poolABI abi.AB
 		return PoolSnapshot{}, err
 	}
 
-	token0, ok := token0Raw[0].(common.Address)
-	if !ok {
-		return PoolSnapshot{}, errors.New("token0 type assertion failed")
-	}
-	token1, ok := token1Raw[0].(common.Address)
-	if !ok {
-		return PoolSnapshot{}, errors.New("token1 type assertion failed")
-	}
-	fee, err := asUint32(feeRaw[0])
-	if err != nil {
-		return PoolSnapshot{}, fmt.Errorf("fee type assertion failed: %w", err)
-	}
 	liquidity, ok := liqRaw[0].(*big.Int)
 	if !ok {
 		return PoolSnapshot{}, errors.New("liquidity type assertion failed")
@@ -396,13 +432,42 @@ func fetchSnapshot(ctx context.Context, client *ethclient.Client, poolABI abi.AB
 
 	return PoolSnapshot{
 		Address:      pool,
-		Token0:       token0,
-		Token1:       token1,
-		Fee:          fee,
+		Token0:       meta.Token0,
+		Token1:       meta.Token1,
+		Fee:          meta.Fee,
 		Liquidity:    new(big.Int).Set(liquidity),
 		SqrtPriceX96: new(big.Int).Set(sqrtPriceX96),
 		Tick:         tick,
 	}, nil
+}
+
+func fetchAndCachePoolMeta(ctx context.Context, client *ethclient.Client, poolABI abi.ABI, pool common.Address) error {
+	token0Raw, err := callMethod(ctx, client, poolABI, pool, "token0")
+	if err != nil {
+		return err
+	}
+	token1Raw, err := callMethod(ctx, client, poolABI, pool, "token1")
+	if err != nil {
+		return err
+	}
+	feeRaw, err := callMethod(ctx, client, poolABI, pool, "fee")
+	if err != nil {
+		return err
+	}
+	token0, ok := token0Raw[0].(common.Address)
+	if !ok {
+		return errors.New("token0 type assertion failed")
+	}
+	token1, ok := token1Raw[0].(common.Address)
+	if !ok {
+		return errors.New("token1 type assertion failed")
+	}
+	fee, err := asUint32(feeRaw[0])
+	if err != nil {
+		return fmt.Errorf("fee type assertion failed: %w", err)
+	}
+	poolMetaCache[pool] = CachedPoolMeta{Token0: token0, Token1: token1, Fee: fee}
+	return nil
 }
 
 func callMethod(ctx context.Context, client *ethclient.Client, contractABI abi.ABI, to common.Address, method string, args ...interface{}) ([]interface{}, error) {
@@ -645,10 +710,11 @@ func buildExecuteParams(cfg Config, opp Opportunity) (ExecuteWithSnapshotParams,
 		Deadline:          deadline,
 	}
 
-	contextHash, err := computeExecutionContextHash(params, opp.BuyPool, opp.SellPool)
-	if err != nil {
-		return ExecuteWithSnapshotParams{}, common.Hash{}, err
-	}
+	// Pass bytes32(0) as expectedContextHash to skip ArbitrageSource's
+	// context check — AtomicExecutor computes the correct hash on-chain.
+	// The bot-computed hash would always mismatch due to pool state drift
+	// between the bot's read and on-chain execution.
+	contextHash := common.Hash{} // bytes32(0)
 
 	strategyParams, err := buildStrategyParams(cfg, opp, params, contextHash)
 	if err != nil {

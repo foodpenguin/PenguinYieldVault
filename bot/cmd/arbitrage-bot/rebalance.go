@@ -244,6 +244,17 @@ func (r *RebalanceRunner) RunCycle(
 			)
 			return nil
 		}
+	} else {
+		// Bootstrap also respects cooldown to prevent withdraw→bootstrap loop
+		timeSinceLast := nowUnix - r.state.LastRebalanceUnix
+		if r.state.LastRebalanceUnix > 0 && timeSinceLast < int64(cfg.RebalanceCooldownSec) {
+			log.Printf(
+				"bootstrap skip: cooldown in effect (time since last action: %ds < %ds)",
+				timeSinceLast,
+				cfg.RebalanceCooldownSec,
+			)
+			return nil
+		}
 	}
 
 	assetAddr, err := r.fetchStrategyAsset(ctx, client, cfg.RebalanceSource)
@@ -386,9 +397,11 @@ func (r *RebalanceRunner) RunCycle(
 		log.Printf("rebalance tx sent: %s (principalToSettle: %s)", txHash.Hex(), debtToSettle.String())
 	}
 
+	// Always update lastRebalanceUnix for all successful tx submissions
+	// to prevent withdraw→bootstrap rapid cycling
+	r.state.LastRebalanceUnix = nowUnix
 	if action == 0 || isBootstrap {
 		r.state.BasePrice = price
-		r.state.LastRebalanceUnix = nowUnix
 		resetCandlesToCurrentBucket(&r.state.AtrCandles, nowUnix, int64(cfg.RebalanceATRPeriodSec), price)
 	}
 	return nil

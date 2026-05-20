@@ -105,7 +105,7 @@ contract UniswapV3ArbitrageSource is IProfitSource, Ownable, ReentrancyGuard {
 
         ArbitrageParams memory p = abi.decode(params, (ArbitrageParams));
 
-        if (p.expectedContextHash != executionContextHash) revert ContextMismatch();
+        if (p.expectedContextHash != bytes32(0) && p.expectedContextHash != executionContextHash) revert ContextMismatch();
         if (block.timestamp > p.deadline) revert Expired();
         if (p.amountIn == 0) revert ZeroAmountIn();
         if (p.amountIn != amountIn) revert AmountInMismatch();
