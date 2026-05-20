@@ -153,9 +153,8 @@ func (r *RebalanceRunner) RunCycle(
 	if r.state.BasePrice <= 0 {
 		r.state.BasePrice = price
 	}
-	if r.state.LastRebalanceUnix == 0 {
-		r.state.LastRebalanceUnix = nowUnix
-	}
+	// NOTE: Do NOT auto-initialize LastRebalanceUnix here.
+	// Leaving it at 0 allows the first bootstrap to bypass cooldown.
 
 	maxAtrCandles := cfg.RebalanceATRLength * 4
 	if maxAtrCandles < cfg.RebalanceATRLength+2 {
