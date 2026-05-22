@@ -33,7 +33,7 @@ PenguinYieldVault 是一套自動化的鏈上做市與流動性再平衡系統�
          ▼
  ┌──────────────────┐
  │   Vault (ERC4626) │  ◄── pyETH Shares
- │   totalAssets()   │  ◄── NAV-based accounting (queries strategy NAV)
+ │   totalAssets()   │  ◄── Debt-based accounting (prevents oracle manipulation)
  └───────┬──────────┘
          │ allocateToStrategy / settleStrategy
          ▼
@@ -69,6 +69,14 @@ PenguinYieldVault 是一套自動化的鏈上做市與流動性再平衡系統�
 
 ```
 PenguinYieldVault/
+├── api/                           # Go GraphQL API 數據分析後端
+│   ├── cmd/api-server/            # 主程式入口 (GraphQL + Indexer)
+│   ├── internal/                  # 內部核心邏輯
+│   │   ├── store/                 # SQLite 資料存取庫
+│   │   ├── indexer/               # 鏈上日誌解析與 TVL 快照
+│   │   └── graphql/               # GraphQL Schema 與解析器
+│   ├── schema.graphql             # GraphQL 模式定義文件
+│   └── README.md                  # API 文件
 ├── bot/                           # Go 機器人程序模組
 │   ├── cmd/arbitrage-bot/         # 主程式入口
 │   │   ├── main.go                # 套利掃描、池快照、交易構建
@@ -77,7 +85,7 @@ PenguinYieldVault/
 │   └── go.mod / go.sum            # Go 依賴管理
 ├── contracts/                     # Solidity 智能合約模組（Foundry）
 │   ├── src/                       # 合約原始碼
-│   │   ├── Vault.sol              # ERC-4626 金庫，NAV-based 記帳
+│   │   ├── Vault.sol              # ERC-4626 金庫，債務基礎記帳
 │   │   ├── StrategyRouter.sol     # 策略路由與損失控制
 │   │   ├── AtomicExecutor.sol     # 原子化交易執行器
 │   │   ├── UniswapV3ArbitrageSource.sol  # 跨池套利合約
@@ -103,11 +111,12 @@ PenguinYieldVault/
 ### Vault (`Vault.sol`)
 遵循 ERC-4626 協議規範的核心資產金庫。
 
-- **NAV-based 記帳**：`totalAssets()` 優先查詢策略的即時 NAV（`estimatedNavInAsset()`），確保 share/asset 匯率精確反映策略真實價值。無 NAV 方法的策略則 fallback 到 `strategyDebt`。
-- **準備金制度**：透過 `minIdleBps` 控制閒置資金比例，確保用戶提款流動性。
+- **債務基礎記帳 (Debt-based Accounting)**：`totalAssets()` 採用債務基礎記帳，將閒置資產加總各策略的債務總額。此設計杜絕了因 Uniswap V3 LP 價格波動或閃電貸操縱帶來的即時淨值操縱與三明治攻擊。
+- **準備金制度**：透過 `minIdleBps` 控制閒置資金比例，確保閒置資產的安全分配。
 - **績效費用**：`performanceFeeBps` 從策略淨利潤中抽取績效費，鑄造份額給 `feeRecipient`。
 - **PnL 平滑**：EMA 指數移動平均平滑利潤追蹤。
 - **ETH 原生支援**：`depositETH()` / `withdrawETH()` / `redeemETH()` 支援原生 ETH 自動封裝/解封。
+- **標準 ERC-4626 提領相容**：當金庫內閒置資金（`idleAssets()`）足夠時，用戶可直接提領或贖回。若閒置資金不足以完全支應，系統將拒絕即時的原生 ETH 提領（`withdrawETH`/`redeemETH`）以防止 WETH 解包失敗，並要求 Keeper/Owner 觸發策略資金回收（`requestStrategyRecall`），藉此維護金庫運作的安全與標準兼容性。
 
 ### StrategyRouter (`StrategyRouter.sol`)
 策略執行授權與調度模組。
@@ -156,17 +165,43 @@ Uniswap V3 單池流動性頭寸管理合約。
 
 ---
 
+## GraphQL API 數據分析後端
+
+本專案新增了基於 Go 語言與 SQLite 資料庫搭建的輕量級事件索引（Indexer）與 GraphQL API 伺服器，用以將鏈上的關鍵數據轉換成結構化的時間序列與歷史統計資訊，供前端介面及分析工具查詢。
+
+### 核心功能
+
+- **鏈上事件即時索引**：持續監聽並解析合約的 `Deposit`、`Withdraw`、`StrategySettled`、`StrategySettledDetails`、`CapitalAllocated`、`PerformanceFeeMinted` 等事件。
+- **電視鎖定價值 (TVL) 快照**：定時記錄金庫的 TVL、閒置資產以及策略債務。
+- **SQLite 儲存媒介**：採用啟用 WAL 模式的 SQLite 作為高效能、零維運成本的單檔案資料庫。
+- **GraphQL 查詢介面**：提供整合後的金庫歷史 APY、TVL 變化趨勢、用戶交易紀錄及機器人套利/再平衡操作明細。
+- **GraphiQL 測試沙盒**：內嵌 GraphiQL Playground，方便在瀏覽器中直接運行與測試查詢。
+
+### 執行與使用方式
+
+```bash
+# 1. 進入 api 目錄
+cd api
+
+# 2. 啟動 API 伺服器（將自動讀取根目錄的 .env 進行設定）
+go run ./cmd/api-server/
+```
+
+伺服器啟動後，可在瀏覽器中打開 **http://localhost:8080/graphql** 進入互動式查詢沙盒。
+
+---
+
 ## 合約部署地址 (Sepolia)
 
 | 合約 | 地址 | Etherscan |
 |---|---|---|
-| **Vault** | `0xAbB1686fC4A62AB120e2221065Cc73C0F36b1c43` | [查看](https://sepolia.etherscan.io/address/0xAbB1686fC4A62AB120e2221065Cc73C0F36b1c43) |
-| **BotRegistry** | `0x110dBe08e056F3bf3b5a4d1B104A90a6230c414F` | [查看](https://sepolia.etherscan.io/address/0x110dBe08e056F3bf3b5a4d1B104A90a6230c414F) |
-| **StrategyRouter** | `0xF63Dd1cF0045500bBDb6b7c0407ec2B5e5B207c0` | [查看](https://sepolia.etherscan.io/address/0xF63Dd1cF0045500bBDb6b7c0407ec2B5e5B207c0) |
-| **OnchainStateLens** | `0x58d10ae8201E85eC1A0bE7482E1bc658B07c87b4` | [查看](https://sepolia.etherscan.io/address/0x58d10ae8201E85eC1A0bE7482E1bc658B07c87b4) |
-| **AtomicExecutor** | `0xc753342812eA4B8F6931823a8d8bf0B7b4557F91` | [查看](https://sepolia.etherscan.io/address/0xc753342812eA4B8F6931823a8d8bf0B7b4557F91) |
-| **ArbitrageSource** | `0xF1Cc4B201DaD644Aea8fD330B984c3A4a2ADe2AE` | [查看](https://sepolia.etherscan.io/address/0xF1Cc4B201DaD644Aea8fD330B984c3A4a2ADe2AE) |
-| **LP Strategy** | `0x98CC94AF400ddd04DD2009F38c11Beb646a8E324` | [查看](https://sepolia.etherscan.io/address/0x98CC94AF400ddd04DD2009F38c11Beb646a8E324) |
+| **Vault** | `0x57436623bb4fe74e7dab0d7c643aa5442b10ee17` | [查看](https://sepolia.etherscan.io/address/0x57436623bb4fe74e7dab0d7c643aa5442b10ee17) |
+| **BotRegistry** | `0xfd9bd020d168fdb264e344a6fb95bd24603440ce` | [查看](https://sepolia.etherscan.io/address/0xfd9bd020d168fdb264e344a6fb95bd24603440ce) |
+| **StrategyRouter** | `0xde0f2145f99b746db09e568e08af70bc5f6c7833` | [查看](https://sepolia.etherscan.io/address/0xde0f2145f99b746db09e568e08af70bc5f6c7833) |
+| **OnchainStateLens** | `0xd3627608aa4c5c071fcbe13c4ff5ac83d9beb69b` | [查看](https://sepolia.etherscan.io/address/0xd3627608aa4c5c071fcbe13c4ff5ac83d9beb69b) |
+| **AtomicExecutor** | `0x3c9e6b6b25f74e905bb63a35154348e09fc14a7f` | [查看](https://sepolia.etherscan.io/address/0x3c9e6b6b25f74e905bb63a35154348e09fc14a7f) |
+| **ArbitrageSource** | `0x7c57878661b537558e0f3eeece0bac6b44365cf3` | [查看](https://sepolia.etherscan.io/address/0x7c57878661b537558e0f3eeece0bac6b44365cf3) |
+| **LP Strategy** | `0x13a30c89b07730ade8c8c2f6bf0dd68b9328a702` | [查看](https://sepolia.etherscan.io/address/0x13a30c89b07730ade8c8c2f6bf0dd68b9328a702) |
 
 > **Share Token**: pyETH (Penguin Yield Eth Vault Share)  
 > **底層資產**: WETH (Sepolia)  
@@ -319,8 +354,8 @@ cast call $VAULT_ADDRESS "idleAssets()(uint256)" --rpc-url $RPC_URL
 # 策略借貸餘額
 cast call $VAULT_ADDRESS "totalStrategyDebt()(uint256)" --rpc-url $RPC_URL
 
-# 待沖銷虧損
-cast call $VAULT_ADDRESS "pendingLoss()(uint256)" --rpc-url $RPC_URL
+# 待沖銷虧損 (需傳入特定策略地址)
+cast call $VAULT_ADDRESS "strategyPendingLoss(address)(uint256)" <STRATEGY_ADDRESS> --rpc-url $RPC_URL
 
 # 每股淨值 (1 share = ? WETH)
 cast call $VAULT_ADDRESS "convertToAssets(uint256)(uint256)" 1000000000000000000 --rpc-url $RPC_URL
@@ -364,8 +399,8 @@ function totalStrategyDebt() public view returns (uint256);
 // 特定策略借出本金
 function strategyDebt(address strategy) public view returns (uint256);
 
-// 待沖銷虧損
-function pendingLoss() public view returns (uint256);
+// 特定策略待沖銷虧損
+function strategyPendingLoss(address strategy) public view returns (uint256);
 
 // EMA 平滑利潤
 function smoothedPnl() public view returns (int256);
@@ -373,7 +408,7 @@ function smoothedPnl() public view returns (int256);
 // Shares → Assets 換算
 function convertToAssets(uint256 shares) public view returns (uint256);
 
-// 最大可提取資產（受閒置資金限制）
+// 最大可提取資產 (標準 ERC-4626 接口，不受閒置資金強制性硬性上限)
 function maxWithdraw(address owner) public view returns (uint256);
 ```
 
