@@ -189,6 +189,77 @@ go run ./cmd/api-server/
 
 伺服器啟動後，可在瀏覽器中打開 **http://localhost:8080/graphql** 進入互動式查詢沙盒。
 
+### 查詢與整合範例
+
+前端與其他客戶端可以透過發送標準 HTTP POST 請求至 `http://localhost:8080/graphql` 來串接數據，請求主體（Body）為 JSON 格式，如下所示：
+
+#### 1. 查詢金庫統計摘要 (Vault Stats)
+此查詢用以獲取金庫的總報告收益、總損失、待分配本金等即時數據：
+```graphql
+query {
+  vaultStats {
+    totalReportedProfit
+    totalReportedLoss
+    totalGrossProfit
+    totalFeeAssetsAccrued
+    totalStrategyDebt
+    smoothedPnl
+  }
+}
+```
+
+#### 2. 查詢歷史 TVL 趨勢 (TVL History)
+查詢特定時間區間內的 TVL 變動，便於前端繪製圖表：
+```graphql
+query {
+  tvlHistory(from: 1716300000, to: 1716400000, interval: "day") {
+    timestamp
+    totalAssets
+    idleAssets
+    strategyDebt
+    blockNumber
+  }
+}
+```
+
+#### 3. 查詢用戶歷史交易 (User Transactions)
+輸入用戶的錢包地址，獲取其存款及提款事件：
+```graphql
+query {
+  userTransactions(user: "0x111cF245355BDe9633C530f701B6B64D71a22BCA", first: 10, skip: 0) {
+    txHash
+    blockNumber
+    timestamp
+    type
+    assets
+    shares
+  }
+}
+```
+
+#### 4. JavaScript 串接範例
+```javascript
+const query = `
+  query GetVaultStats {
+    vaultStats {
+      totalReportedProfit
+      totalStrategyDebt
+    }
+  }
+`;
+
+fetch("http://localhost:8080/graphql", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({ query }),
+})
+  .then((res) => res.json())
+  .then((data) => console.log(data.data.vaultStats))
+  .catch((err) => console.error("Error fetching GraphQL API:", err));
+```
+
 ---
 
 ## 合約部署地址 (Sepolia)
