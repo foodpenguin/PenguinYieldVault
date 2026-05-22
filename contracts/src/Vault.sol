@@ -9,10 +9,7 @@ import {ERC4626} from "openzeppelin-contracts/contracts/token/ERC20/extensions/E
 import {ReentrancyGuard} from "openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
 import {Math} from "openzeppelin-contracts/contracts/utils/math/Math.sol";
 
-/// @notice Optional interface for strategies that can report their NAV
-interface IStrategyNav {
-    function estimatedNavInAsset() external view returns (uint256);
-}
+
 
 interface IWETHMinimal {
     function deposit() external payable;
@@ -37,7 +34,7 @@ contract Vault is ERC4626, Ownable, ReentrancyGuard {
     uint256 public totalStrategyDebt;
     uint256 public totalGrossProfit;
     uint256 public totalFeeAssetsAccrued;
-    uint256 public pendingLoss;
+    mapping(address => uint256) public strategyPendingLoss;
 
     int256 public smoothedPnl;
 
@@ -100,19 +97,7 @@ contract Vault is ERC4626, Ownable, ReentrancyGuard {
         feeRecipient = msg.sender;
     }
 
-    /// @notice Cap maxWithdraw by idle assets to prevent strategy-locked failures
-    function maxWithdraw(address owner_) public view override returns (uint256) {
-        uint256 byShares = super.maxWithdraw(owner_);
-        uint256 idle = idleAssets();
-        return byShares < idle ? byShares : idle;
-    }
 
-    /// @notice Cap maxRedeem by idle-backed share capacity
-    function maxRedeem(address owner_) public view override returns (uint256) {
-        uint256 byShares = super.maxRedeem(owner_);
-        uint256 idleShares = _convertToShares(idleAssets(), Math.Rounding.Floor);
-        return byShares < idleShares ? byShares : idleShares;
-    }
 
     /// @notice Deposit native ETH (auto-wraps to WETH)
     function depositETH(address receiver) external payable nonReentrant returns (uint256 shares) {
@@ -139,7 +124,8 @@ contract Vault is ERC4626, Ownable, ReentrancyGuard {
     {
         require(receiver != address(0), "ZERO_RECEIVER");
         require(assets > 0, "ZERO_ASSETS");
-        require(assets <= maxWithdraw(owner_), "MAX_WITHDRAW_EXCEEDED");
+        require(assets <= idleAssets(), "INSUFFICIENT_IDLE");
+        require(assets <= super.maxWithdraw(owner_), "MAX_WITHDRAW_EXCEEDED");
 
         shares = previewWithdraw(assets);
         if (msg.sender != owner_) {
@@ -161,7 +147,9 @@ contract Vault is ERC4626, Ownable, ReentrancyGuard {
     {
         require(receiver != address(0), "ZERO_RECEIVER");
         require(shares > 0, "ZERO_SHARES");
-        require(shares <= maxRedeem(owner_), "MAX_REDEEM_EXCEEDED");
+        uint256 idleShares = _convertToShares(idleAssets(), Math.Rounding.Floor);
+        require(shares <= idleShares, "INSUFFICIENT_IDLE");
+        require(shares <= super.maxRedeem(owner_), "MAX_REDEEM_EXCEEDED");
 
         assets = previewRedeem(shares);
         if (msg.sender != owner_) {
@@ -255,9 +243,10 @@ contract Vault is ERC4626, Ownable, ReentrancyGuard {
             totalGrossProfit += grossProfit;
 
             netProfitAfterOffset = grossProfit;
-            if (pendingLoss > 0 && netProfitAfterOffset > 0) {
-                lossOffset = pendingLoss < netProfitAfterOffset ? pendingLoss : netProfitAfterOffset;
-                pendingLoss -= lossOffset;
+            uint256 sPendingLoss = strategyPendingLoss[strategy];
+            if (sPendingLoss > 0 && netProfitAfterOffset > 0) {
+                lossOffset = sPendingLoss < netProfitAfterOffset ? sPendingLoss : netProfitAfterOffset;
+                strategyPendingLoss[strategy] = sPendingLoss - lossOffset;
                 netProfitAfterOffset -= lossOffset;
             }
 
@@ -269,13 +258,13 @@ contract Vault is ERC4626, Ownable, ReentrancyGuard {
         } else {
             loss = principal - returnedAssets;
             totalReportedLoss += loss;
-            pendingLoss += loss;
+            strategyPendingLoss[strategy] += loss;
         }
 
         _updateSmoothedPnl(principal, returnedAssets);
 
         emit StrategySettled(strategy, principal, returnedAssets, profit, loss, strategyDebt[strategy], totalStrategyDebt);
-        emit StrategySettledDetails(strategy, grossProfit, profit, feeAssets, lossOffset, pendingLoss);
+        emit StrategySettledDetails(strategy, grossProfit, profit, feeAssets, lossOffset, strategyPendingLoss[strategy]);
     }
 
     function setRouter(address newRouter) external onlyOwner {
@@ -381,24 +370,17 @@ contract Vault is ERC4626, Ownable, ReentrancyGuard {
         require(ok, "ETH_TRANSFER_FAILED");
     }
 
-    /// @notice totalAssets = idle + strategy value (NAV-based when available)
+    /// @notice totalAssets = idle + strategy debt (debt-based accounting prevents flash loan manipulation)
     function totalAssets() public view override returns (uint256) {
         return idleAssets() + _totalStrategyValue();
     }
 
-    /// @dev Sum strategy values: uses live NAV if available, otherwise falls back to debt
+    /// @dev Sum strategy values: uses debt-based accounting to prevent flash loan NAV manipulation
     function _totalStrategyValue() internal view returns (uint256 value) {
         uint256 len = _strategies.length;
         for (uint256 i = 0; i < len; i++) {
             address s = _strategies[i];
-            uint256 debt = strategyDebt[s];
-            if (debt == 0) continue;
-
-            try IStrategyNav(s).estimatedNavInAsset() returns (uint256 nav) {
-                value += nav;
-            } catch {
-                value += debt;
-            }
+            value += strategyDebt[s];
         }
     }
 

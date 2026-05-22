@@ -1,0 +1,61 @@
+type Query {
+  # Historical TVL snapshots filtered by timestamp range and optional hourly/daily aggregation
+  tvlHistory(from: Int!, to: Int!, interval: String!): [TVLSnapshot!]!
+  
+  # Historical APY data points derived from settle events
+  apyHistory(from: Int!, to: Int!, interval: String!): [APYSnapshot!]!
+  
+  # Paginated list of deposits and withdrawals for a specific user
+  userTransactions(user: String!, first: Int, skip: Int): [UserTransaction!]!
+  
+  # Aggregated statistics and current standing of the vault
+  vaultStats: VaultStats!
+  
+  # Paginated log of bot rebalancing and execution operations
+  botOperations(first: Int, skip: Int): [BotOperation!]!
+}
+
+type TVLSnapshot {
+  timestamp: Int!
+  totalAssets: String!      # Asset amount in wei
+  idleAssets: String!       # Asset amount in wei
+  strategyDebt: String!     # Asset amount in wei
+  blockNumber: Int!
+}
+
+type APYSnapshot {
+  timestamp: Int!
+  apy: Float!               # Annualized yield percentage
+  cumulativeProfit: String! # Wei amount
+  cumulativeLoss: String!   # Wei amount
+}
+
+type UserTransaction {
+  txHash: String!
+  blockNumber: Int!
+  timestamp: Int!
+  type: String!             # "Deposit" | "Withdraw"
+  user: String!             # Address of the user
+  assets: String!           # Asset amount in wei
+  shares: String!           # Share amount in wei
+}
+
+type VaultStats {
+  totalReportedProfit: String!   # Wei amount
+  totalReportedLoss: String!     # Wei amount
+  totalGrossProfit: String!      # Wei amount
+  totalFeeAssetsAccrued: String! # Performance fees collected
+  totalStrategyDebt: String!     # Outstanding capital allocated to strategies
+  smoothedPnl: String!           # EMA of smoothed P&L from Vault contract
+}
+
+type BotOperation {
+  txHash: String!
+  blockNumber: Int!
+  timestamp: Int!
+  type: String!             # "StrategyExecuted" | "StrategyManaged" | "CapitalAllocated" | "StrategySettled" | "PerformanceFeeMinted"
+  source: String!           # Strategy or Source contract address
+  profit: String!           # Wei amount
+  loss: String!             # Wei amount
+  details: String           # JSON string containing operation-specific metadata
+}
