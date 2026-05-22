@@ -44,7 +44,8 @@ go run ./cmd/api-server/
 ```
 
 Access the interactive GraphQL interface by navigating to:
-**[http://localhost:8080/graphql](http://localhost:8080/graphql)**
+* **Public Cloud Server**: **[http://34.81.58.100:8080/graphql](http://34.81.58.100:8080/graphql)**
+* **Local Development**: **[http://localhost:8080/graphql](http://localhost:8080/graphql)**
 
 ---
 

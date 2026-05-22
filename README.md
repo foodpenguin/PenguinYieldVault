@@ -187,11 +187,11 @@ cd api
 go run ./cmd/api-server/
 ```
 
-伺服器啟動後，可在瀏覽器中打開 **http://localhost:8080/graphql** 進入互動式查詢沙盒。
+伺服器啟動後，可在瀏覽器中打開 **http://34.81.58.100:8080/graphql** (雲端生產環境) 或 **http://localhost:8080/graphql** (本地開發環境) 進入互動式查詢沙盒。
 
 ### 查詢與整合範例
 
-前端與其他客戶端可以透過發送標準 HTTP POST 請求至 `http://localhost:8080/graphql` 來串接數據，請求主體（Body）為 JSON 格式，如下所示：
+前端與其他客戶端可以透過發送標準 HTTP POST 請求至 `http://34.81.58.100:8080/graphql`（雲端主機）或 `http://localhost:8080/graphql`（本地主機）來串接數據，請求主體（Body）為 JSON 格式，如下所示：
 
 #### 1. 查詢金庫統計摘要 (Vault Stats)
 此查詢用以獲取金庫的總報告收益、總損失、待分配本金等即時數據：
@@ -248,7 +248,7 @@ const query = `
   }
 `;
 
-fetch("http://localhost:8080/graphql", {
+fetch("http://34.81.58.100:8080/graphql", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
