@@ -1,5 +1,6 @@
 # Binaries
-api-server
+/api-server
 
 # Databases
 data/
+
