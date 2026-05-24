@@ -313,6 +313,18 @@ func (s *Store) InsertSettlement(txHash string, blockNumber, timestamp int64, st
 	return err
 }
 
+// UpdateSettlementDetails updates gross_profit and fee_assets for a settlement matched by tx_hash.
+func (s *Store) UpdateSettlementDetails(txHash, grossProfit, feeAssets string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(
+		"UPDATE strategy_settlements SET gross_profit = ?, fee_assets = ? WHERE tx_hash = ?",
+		grossProfit, feeAssets, txHash,
+	)
+	return err
+}
+
 // GetAPYHistory calculates historical APY from settlement data.
 func (s *Store) GetAPYHistory(from, to int64) ([]APYSnapshot, error) {
 	s.mu.RLock()

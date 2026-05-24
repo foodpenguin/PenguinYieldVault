@@ -308,6 +308,13 @@ func (idx *Indexer) handleStrategySettledDetails(vLog types.Log, timestamp int64
 	}
 	detailsJSON, _ := json.Marshal(details)
 
+	// Update the corresponding strategy_settlements row with gross_profit and fee_assets
+	// The StrategySettledDetails event is emitted in the same transaction as StrategySettled,
+	// so we can match by tx_hash to enrich the settlement record.
+	if err := idx.store.UpdateSettlementDetails(vLog.TxHash.Hex(), grossProfit.String(), feeAssets.String()); err != nil {
+		log.Printf("indexer: failed to update settlement details for tx %s: %v", vLog.TxHash.Hex(), err)
+	}
+
 	return idx.store.InsertBotOperation(store.BotOperation{
 		TxHash:      vLog.TxHash.Hex(),
 		BlockNumber: int64(vLog.BlockNumber),
