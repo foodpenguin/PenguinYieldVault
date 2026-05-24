@@ -124,7 +124,7 @@ func (s *Store) migrate() error {
 
 		CREATE TABLE IF NOT EXISTS strategy_settlements (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			tx_hash TEXT NOT NULL,
+			tx_hash TEXT NOT NULL UNIQUE,
 			block_number INTEGER NOT NULL,
 			timestamp INTEGER NOT NULL,
 			strategy TEXT NOT NULL,
@@ -141,6 +141,11 @@ func (s *Store) migrate() error {
 			key TEXT PRIMARY KEY,
 			value TEXT NOT NULL
 		);
+
+		-- Migration: ensure tx_hash uniqueness for upsert support.
+		-- For existing databases where the table was created without UNIQUE,
+		-- this adds the unique index. Safe to run repeatedly.
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_settle_tx_hash ON strategy_settlements(tx_hash);
 	`)
 	return err
 }
@@ -301,28 +306,65 @@ func (s *Store) GetBotOperations(first, skip int) ([]BotOperation, error) {
 
 // --- Strategy Settlements ---
 
-// InsertSettlement inserts a strategy settlement record.
+// InsertSettlement inserts or updates a strategy settlement record.
+// If a partial row already exists (created by UpdateSettlementDetails arriving first),
+// the existing gross_profit and fee_assets values are preserved via upsert.
 func (s *Store) InsertSettlement(txHash string, blockNumber, timestamp int64, strategy, principal, returnedAssets, profit, loss, grossProfit, feeAssets string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	_, err := s.db.Exec(
-		"INSERT INTO strategy_settlements (tx_hash, block_number, timestamp, strategy, principal, returned_assets, profit, loss, gross_profit, fee_assets) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		txHash, blockNumber, timestamp, strategy, principal, returnedAssets, profit, loss, grossProfit, feeAssets,
-	)
+	// Use INSERT ... ON CONFLICT to merge with any partial row that was
+	// created by a StrategySettledDetails event arriving before this one.
+	// Preserve existing non-zero gross_profit/fee_assets values.
+	_, err := s.db.Exec(`
+		INSERT INTO strategy_settlements (tx_hash, block_number, timestamp, strategy, principal, returned_assets, profit, loss, gross_profit, fee_assets)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(tx_hash) DO UPDATE SET
+			block_number = excluded.block_number,
+			timestamp = excluded.timestamp,
+			strategy = excluded.strategy,
+			principal = excluded.principal,
+			returned_assets = excluded.returned_assets,
+			profit = excluded.profit,
+			loss = excluded.loss,
+			gross_profit = CASE WHEN strategy_settlements.gross_profit != '0' THEN strategy_settlements.gross_profit ELSE excluded.gross_profit END,
+			fee_assets = CASE WHEN strategy_settlements.fee_assets != '0' THEN strategy_settlements.fee_assets ELSE excluded.fee_assets END
+	`, txHash, blockNumber, timestamp, strategy, principal, returnedAssets, profit, loss, grossProfit, feeAssets)
 	return err
 }
 
-// UpdateSettlementDetails updates gross_profit and fee_assets for a settlement matched by tx_hash.
+// UpdateSettlementDetails updates or inserts gross_profit and fee_assets for a settlement.
+// If the settlement row does not yet exist (StrategySettledDetails arrives before StrategySettled),
+// a partial row is created so the data is not lost.
 func (s *Store) UpdateSettlementDetails(txHash, grossProfit, feeAssets string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	_, err := s.db.Exec(
+	// First try to update an existing row.
+	result, err := s.db.Exec(
 		"UPDATE strategy_settlements SET gross_profit = ?, fee_assets = ? WHERE tx_hash = ?",
 		grossProfit, feeAssets, txHash,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	// If no row was updated, the StrategySettled event hasn't been processed yet.
+	// Insert a partial row so the data is preserved for when InsertSettlement runs.
+	if rowsAffected == 0 {
+		_, err = s.db.Exec(
+			"INSERT INTO strategy_settlements (tx_hash, block_number, timestamp, strategy, principal, returned_assets, profit, loss, gross_profit, fee_assets) VALUES (?, 0, 0, '', '0', '0', '0', '0', ?, ?)",
+			txHash, grossProfit, feeAssets,
+		)
+		return err
+	}
+
+	return nil
 }
 
 // GetAPYHistory calculates historical APY from settlement data.
