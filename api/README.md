@@ -44,7 +44,7 @@ go run ./cmd/api-server/
 ```
 
 Access the interactive GraphQL interface by navigating to:
-* **Public Cloud Server**: **[https://35-229-229-75.nip.io/playground](https://35-229-229-75.nip.io/playground)**
+* **Public Cloud Server**: **[https://api.foodpenguin.space/playground](https://api.foodpenguin.space/playground)**
 * **Local Development**: **[http://localhost:8080/playground](http://localhost:8080/playground)**
 
 ---

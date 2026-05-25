@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -130,6 +132,27 @@ func main() {
 		w.Header().Set("Content-Type", "text/html")
 		w.Write([]byte(playgroundHTML))
 	}))
+
+	// Tunnel URL discovery endpoint: returns the current Cloudflare Tunnel URL
+	tunnelURLFile := filepath.Join(filepath.Dir(dbPath), "tunnel-url.txt")
+	http.Handle("/tunnel-url", corsHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, err := os.ReadFile(tunnelURLFile)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			json.NewEncoder(w).Encode(map[string]string{"error": "tunnel URL not available"})
+			return
+		}
+		tunnelURL := strings.TrimSpace(string(data))
+		if tunnelURL == "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			json.NewEncoder(w).Encode(map[string]string{"error": "tunnel URL not ready yet"})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"url": tunnelURL + "/graphql"})
+	})))
 
 	// Redirect root to playground
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
